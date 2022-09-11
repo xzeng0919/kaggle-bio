@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import pickle
 
-from gensim.models import Word2Vec
+from gensim.models import FastText
+from fse.models import SIF
+from fse import IndexedList
 from Bio import SeqIO
 
 
@@ -35,6 +37,8 @@ class Dna2vec:
             sequence = str(sequence_dict[key].seq)
             sentence = self.get_kmer_sequence(sequence, k)
             
+            if key.startswith(('0', '1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                key = 'chr' + key
             corpus.append(sentence)
             sentence_name.append(key)    
 
@@ -44,9 +48,19 @@ class Dna2vec:
 
         sentences_vector= {}
         for x in range(len(sentences)):
-            sentences_vector[sentence_name[x]] = model.wv[sentences[x]]
+            
+            vectors = [model.wv[w] for w in sentences[x]
+                   if w in model.wv]
+
+            new_vector = np.zeros(model.vector_size)
+
+            new_vector = (np.array([sum(t) for t in vectors])) / new_vector.size
+
+            sentences_vector[sentence_name[x]] = new_vector
+            print(len(new_vector))
 
         return sentences_vector    
+
 
 
 def main():
@@ -78,23 +92,33 @@ def main():
     sequence_dict = dna2vec.parser_fasta_file(args.input_file)
     sentences,sentence_name = dna2vec.get_ker_sequence_dict(sequence_dict,args.k)
     
-    model = Word2Vec(sentences = sentences,
-                        min_count= 1,
-                        vector_size=8, 
-                        sg=0, 
-                        hs=1,
-                        workers=15, 
-                        window=7,
-                        seed=777,
-                        epochs=5)
-    save_path = os.path.split(args.input_file)[0]
-    model.wv.save_word2vec_format(save_path + '/dna2vec_embed.emb')
-    sentences_vector = dna2vec.extract_sentence_vectors(model, sentences, sentence_name)
+    ft = FastText(sentences, min_count=1,
+                             window=7,
+                             vector_size=4,
+                             seed=777,
+                             workers=15)
+    model = SIF(ft)
+    model.train(IndexedList(sentences))
+    sentence_vectors = np.around(model.sv.vectors, 3)
+    print(sentence_vectors)
+    sentence_dict = {}
 
+    for x in range(len(sentence_name)):
+        sentence_dict[sentence_name[x]] = sentence_vectors[x,]
+        
+    save_path = os.path.split(args.input_file)[0]
+
+ #    print(np.zeros(model.vector_size))
+
+ # #   model.wv.save_word2vec_format(save_path + '/dna2vec_embed.emb')
+ #    sentences_vector = dna2vec.extract_sentence_vectors(model, sentences, sentence_name)
+   # print(sentences_vector)
     with open(save_path + '/dna2vec_sequence_embed.pkl', 'wb') as f:
-        pickle.dumps(sentences_vector, f)
+        pickle.dump(sentence_dict, f)
 
 
 if __name__ == "__main__":
     main()
  
+
+#python dna2vec.py -i ../results/peak_regions.fa -k 6
